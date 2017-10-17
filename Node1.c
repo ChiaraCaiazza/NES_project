@@ -2,8 +2,10 @@
 #include "net/rime/rime.h"
 #include "sys/etimer.h"
 #include "stdio.h"
+#include "core/lib/random.h"
 
 #include "dev/leds.h"
+#include "dev/sht11/sht11-sensor.h"
 
 
 
@@ -13,14 +15,18 @@
 static int alarm_state = 0;
 
 static int command = 0;
+static int temperatures[5] = {0.0, 0.0, 0.0, 0.0, 0.0};
+static int temperature_index = 0;
 
 static unsigned char leds_status;
 
 PROCESS(main_process, "Main process");
 PROCESS(blinking_process, "Blinking process");
 PROCESS(open_door, "Open the door");
+PROCESS(temperature_process, "Temperature process");
+PROCESS(compute_mean_temperateure, "Compute mean temperature");
 
-AUTOSTART_PROCESSES(&main_process);
+AUTOSTART_PROCESSES(&main_process, &temperature_process);
   
 
 static void broadcast_recv(struct broadcast_conn *c, const linkaddr_t *senderAddr){
@@ -70,7 +76,21 @@ static void broadcast_sent(struct broadcast_conn *c, int status, int num_tx){
 
 
 static void recv_runicast(struct runicast_conn *c, const linkaddr_t *sender_addr, uint8_t seqno){
-  printf("runicast message received form %d.%d. Sequence number = %d\n", sender_addr->u8[0], sender_addr->u8[1], seqno);
+  printf("runicast message received from %d.%d. Sequence number = %d\n", 
+                    sender_addr->u8[0], sender_addr->u8[1], seqno);
+
+  command = *(char *)packetbuf_dataptr() - '0';
+  printf("Received command = %d\n", command);
+
+  switch (command){
+    case 4:
+      //compute the mean temp and send it to the CU
+      process_start(&compute_mean_temperateure, NULL);
+
+      break;
+    default:
+      printf("Error: command not recognized\n");
+  }
 }
 
 static void sent_runicast(struct runicast_conn *c, const linkaddr_t *receiver_addr, uint8_t retransmissions)
@@ -92,17 +112,17 @@ static void timedout_runicast(struct runicast_conn *c, const linkaddr_t *receive
 static const struct broadcast_callbacks broadcast_call = {broadcast_recv, broadcast_sent}; 
 static struct broadcast_conn broadcast;
 static const struct runicast_callbacks runicast_calls = {recv_runicast, sent_runicast, timedout_runicast};
-//static struct runicast_conn runicast;
+static struct runicast_conn runicast_CU;
 
 
 
 PROCESS_THREAD(main_process, ev, data){
   /*
-    triggered only when there is a PROCESS_EXIT event, in this case we don't require to keep
-    the connection open
+    triggered only when there is a PROCESS_EXIT event, in this case we don't 
+    require to keep the connection open
   */
   PROCESS_EXITHANDLER(broadcast_close(&broadcast));
-  //PROCESS_EXITHANDLER(runicast_close(&runicast));
+  PROCESS_EXITHANDLER(runicast_close(&runicast_CU));
 
 
   PROCESS_BEGIN();
@@ -114,13 +134,11 @@ PROCESS_THREAD(main_process, ev, data){
     it is a sort of port
   */
   broadcast_open(&broadcast, 129, &broadcast_call);
-  //runicast_open(&runicast, 144, &runicast_calls); //open our runicast connection over the channel #144
+  runicast_open(&runicast_CU, 131, &runicast_calls); //open our runicast connection over the channel #144
 
   while(1) {
 
     PROCESS_WAIT_EVENT();
-
-    
   }
 
   PROCESS_END();
@@ -189,6 +207,79 @@ PROCESS_THREAD(open_door, ev, data){
       leds_off(LEDS_BLUE);
       PROCESS_EXIT();
     }
+  }
+
+  PROCESS_END();
+}
+
+/******************************************************************************* 
+    every 10 seconds take a new temperature measurement.
+    The last 5 measurement are stored in the temperatures array
+*******************************************************************************/
+PROCESS_THREAD(temperature_process, ev, data){
+  static struct etimer temperature_timer;
+
+  PROCESS_BEGIN();
+  etimer_set(&temperature_timer, CLOCK_SECOND*10);
+
+  while(1){
+    PROCESS_WAIT_EVENT_UNTIL(etimer_expired(&temperature_timer));
+
+    //the sensor has to stay active for the minimum amount of time
+    SENSORS_ACTIVATE(sht11_sensor);
+    //actual (normalized) temp sample
+    temperatures[temperature_index%5]  = (
+                            sht11_sensor.value(SHT11_SENSOR_TEMP)/10-396)/10;
+    //stop the sensing phase
+    SENSORS_DEACTIVATE(sht11_sensor);
+
+    //collect a sample every 10 second
+    etimer_restart(&temperature_timer);
+
+    //24° is the default value
+    //RANDOM_MAX = 65535 -> random_rand()/6000 at most 10 values
+    //             +/-5°(more or less)
+      temperatures[temperature_index%5] += (int)random_rand()/6000;;
+
+    temperature_index++;
+
+    printf("temperatures = {%d, %d, %d, %d, %d}\n", temperatures[0],
+            temperatures[1], temperatures[2], temperatures[3], temperatures[4]);
+  }
+
+  PROCESS_END();
+}
+
+
+PROCESS_THREAD(compute_mean_temperateure, ev, data){
+  int mean_temperature = 0;
+  int i;
+
+  PROCESS_BEGIN();
+    
+  for (i = 0; i<5; i++){
+    if (i<temperature_index){
+      mean_temperature += temperatures[i];
+    }
+  }
+
+  if (temperature_index<5)
+    mean_temperature /= temperature_index;
+  else
+    mean_temperature /= 5;
+
+  printf("mean_temperature %d\n", mean_temperature);
+
+  if(!runicast_is_transmitting(&runicast_CU)){
+    linkaddr_t recv;
+
+    //Central unit has rime address 3.0
+    recv.u8[0] = 3;
+    recv.u8[1] = 0;
+
+    packetbuf_copyfrom((void*)&mean_temperature, sizeof(int));
+    //send
+    runicast_send(&runicast_CU, &recv, MAX_RETRANSMISSIONS);
   }
 
   PROCESS_END();
