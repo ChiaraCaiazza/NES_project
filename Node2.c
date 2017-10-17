@@ -72,7 +72,8 @@ static void broadcast_sent(struct broadcast_conn *c, int status, int num_tx){
 }
 
 
-static void recv_runicast(struct runicast_conn *c, const linkaddr_t *sender_addr, uint8_t seqno){
+static void recv_runicast(struct runicast_conn *c, const linkaddr_t *sender_addr, 
+                                                                uint8_t seqno){
   printf("runicast message received from %d.%d. Sequence number = %d\n", 
                     sender_addr->u8[0], sender_addr->u8[1], seqno);
 
@@ -87,8 +88,6 @@ static void recv_runicast(struct runicast_conn *c, const linkaddr_t *sender_addr
       gate_locked = (gate_locked == 0)?1:0;
 
       process_start(&locking_gate, NULL);
-
-
 
       break;
     default:

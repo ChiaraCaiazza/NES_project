@@ -41,6 +41,13 @@ static void broadcast_sent(struct broadcast_conn *c, int status, int num_tx){
 
 static void recv_runicast(struct runicast_conn *c, const linkaddr_t *sender_addr, uint8_t seqno){
   printf("runicast message received from %d.%d. Sequence number = %d\n", sender_addr->u8[0], sender_addr->u8[1], seqno);
+
+  int* data = (int*)packetbuf_dataptr();
+  int measurement = *data;
+
+  if (sender_addr->u8[0] == 1 && sender_addr->u8[1] == 0 && command == 4)
+    printf("Received temperature = %d\n", measurement);
+
 }
 
 static void sent_runicast(struct runicast_conn *c, const linkaddr_t *receiver_addr, uint8_t retransmissions)
@@ -62,7 +69,7 @@ static void timedout_runicast(struct runicast_conn *c, const linkaddr_t *receive
 static const struct broadcast_callbacks broadcast_call = {broadcast_recv, broadcast_sent}; 
 static struct broadcast_conn broadcast;
 static const struct runicast_callbacks runicast_calls = {recv_runicast, sent_runicast, timedout_runicast};
-static struct runicast_conn runicast_node2;
+static struct runicast_conn runicast_node2, runicast_node1;
 
 
 
@@ -76,6 +83,7 @@ PROCESS_THREAD(handle_command_process, ev, data){
   */
   PROCESS_EXITHANDLER(broadcast_close(&broadcast));
   PROCESS_EXITHANDLER(runicast_close(&runicast_node2));
+  PROCESS_EXITHANDLER(runicast_close(&runicast_node1));
 
 
   PROCESS_BEGIN();
@@ -90,6 +98,7 @@ PROCESS_THREAD(handle_command_process, ev, data){
   broadcast_open(&broadcast, 129, &broadcast_call);
   //open a runicast connection with Node2 (garden) over the channel 130
   runicast_open(&runicast_node2,130, &runicast_calls); 
+  runicast_open(&runicast_node1,131, &runicast_calls); 
 
   while(1) {
 
@@ -115,7 +124,8 @@ PROCESS_THREAD(handle_command_process, ev, data){
           button_pressed = 0;
           printf("Command rejected. Deactivate the alarm first.\n");
         }
-        else if(!runicast_is_transmitting(&runicast_node2)){
+        else if(!runicast_is_transmitting(&runicast_node2) && 
+                                  !runicast_is_transmitting(&runicast_node1)){
           command = button_pressed;
           button_pressed = 0;
           printf ("Command = %d.\n", command);
@@ -152,8 +162,17 @@ PROCESS_THREAD(handle_command_process, ev, data){
               broadcast_send(&broadcast);
               break;
             case 4:
+              //sent a runicast message to node 1 so that he compute the mean 
+              //temperature 
+            
+              //the receiver has rime address 1.0
+              recv.u8[0] = 1;
+              recv.u8[1] = 0;
+
+              //then we call the runicast send    
+              runicast_send(&runicast_node1, &recv, MAX_RETRANSMISSIONS);
              
-               break;
+              break;
             case 5:
              
                break;
