@@ -3,41 +3,90 @@
 #include "sys/etimer.h"
 #include "stdio.h"
 
-#include "dev/button-sensor.h"
+#include "dev/leds.h"
+
 
 
 #define MAX_RETRANSMISSIONS 5
 
 //unlocked (0) by default
 static int alarm_state = 0;
+//the gate is locked by default
+static int gate_locked = 1;
 
 static int command = 0;
-static int button_pressed = 0;
 
-PROCESS(handle_command_process, "Handle command process");
-AUTOSTART_PROCESSES(&handle_command_process);
+struct leds{
+  int red;
+  int green;
+  int blue;
+} leds_status;
+
+PROCESS(main_process, "Main process");
+PROCESS(blinking_process, "Blinking process");
+PROCESS(locking_gate, "Locks the gate");
+AUTOSTART_PROCESSES(&main_process);
   
 
 static void broadcast_recv(struct broadcast_conn *c, const linkaddr_t *senderAddr){
   printf("broadcast message received from %d.%d: '%s'\n", senderAddr->u8[0], 
 				senderAddr->u8[1], (char *)packetbuf_dataptr());
+
+  //obtain the int command code from the message
+  command = *(char *)packetbuf_dataptr() - '0';
+  printf("Received command = %d\n", command);
+
+  switch (command){
+    case 1:
+      //the leds have to start blinking or stop blinking, depending on the state
+      //of the alarm
+
+      //update the state of the alarm
+      alarm_state = (alarm_state == 0)?1:0;
+      
+
+      //the user activates the alarm
+      if (alarm_state)
+        process_start(&blinking_process, NULL);
+
+      //the user deactivate the alarm
+      if (!alarm_state)
+        process_exit(&blinking_process);
+
+      printf ("alarm_state = %d\n", alarm_state);
+      break;
+    default:
+      printf("Error: command not recognized\n");
+  }
 }
 
-/*
-   the callbacks broadcast_sent take 3 parameter: a link to the bradcast connection stack , an
-   integer status that specify the status of the trasmission (status == 0 -> ok
-                                                              status == 1 -> collision
-                                                              status == 2 -> NOACK
-                                                              etc....)
-   Finally we have int num_tx that is the number of retrasmissions that have to be performed
-*/
+
 static void broadcast_sent(struct broadcast_conn *c, int status, int num_tx){
   printf("broadcast message sent with status %d. Transmission number = %d\n", status, num_tx);
 }
 
 
 static void recv_runicast(struct runicast_conn *c, const linkaddr_t *sender_addr, uint8_t seqno){
-  printf("runicast message received form %d.%d. Sequence number = %d\n", sender_addr->u8[0], sender_addr->u8[1], seqno);
+  printf("runicast message received from %d.%d. Sequence number = %d\n", sender_addr->u8[0], sender_addr->u8[1], seqno);
+
+  command = *(char *)packetbuf_dataptr() - '0';
+  printf("Rec command = %d\n", command);
+
+  switch (command){
+    case 2:
+      //The CU asked to open/close the gate
+
+      //update the state of the gate
+      gate_locked = (gate_locked == 0)?1:0;
+
+      process_start(&locking_gate, NULL);
+
+
+
+      break;
+    default:
+      printf("Error: command not recognized\n");
+  }
 }
 
 static void sent_runicast(struct runicast_conn *c, const linkaddr_t *receiver_addr, uint8_t retransmissions)
@@ -59,25 +108,21 @@ static void timedout_runicast(struct runicast_conn *c, const linkaddr_t *receive
 static const struct broadcast_callbacks broadcast_call = {broadcast_recv, broadcast_sent}; 
 static struct broadcast_conn broadcast;
 static const struct runicast_callbacks runicast_calls = {recv_runicast, sent_runicast, timedout_runicast};
-static struct runicast_conn runicast;
+static struct runicast_conn runicast_CU;
 
 
 
-PROCESS_THREAD(handle_command_process, ev, data){
-
-  static struct etimer et;
-
+PROCESS_THREAD(main_process, ev, data){
   /*
     triggered only when there is a PROCESS_EXIT event, in this case we don't require to keep
     the connection open
   */
   PROCESS_EXITHANDLER(broadcast_close(&broadcast));
-  PROCESS_EXITHANDLER(runicast_close(&runicast));
+  PROCESS_EXITHANDLER(runicast_close(&runicast_CU));
 
 
   PROCESS_BEGIN();
 
-  SENSORS_ACTIVATE(button_sensor);
 
   /*
     we open the connection. The second parameter is the channel on which the node will 
@@ -85,64 +130,77 @@ PROCESS_THREAD(handle_command_process, ev, data){
     it is a sort of port
   */
   broadcast_open(&broadcast, 129, &broadcast_call);
-  runicast_open(&runicast, 144, &runicast_calls); //open our runicast connection over the channel #144
+  runicast_open(&runicast_CU, 130, &runicast_calls); //open our runicast connection over the channel #144
 
   while(1) {
-    etimer_set(&et, CLOCK_SECOND*4);
 
     PROCESS_WAIT_EVENT();
 
-    if (ev == sensors_event && data == &button_sensor){
-      printf("Button pressed\n");
-
-      if (button_pressed == 0)
-        //set the timer the first time
-        etimer_set(&et, CLOCK_SECOND*4);
-      else
-        //restart the timer (4 seconds from NOW)
-        etimer_restart(&et);
-
-
-      button_pressed ++;
-
-    }else 
-      if (etimer_expired(&et)){        
-        if (button_pressed < 1 || button_pressed > 5)
-          printf("Error: command not recognized.\n");
-        else {
-          command = button_pressed;
-          button_pressed = 0;
-          printf ("Command = %d.\n", command);
-      }
-    }
-
-    /*
-    packetbuf_copyfrom("New message", 12);
-    //broadcast_send(&broadcast);
-
-
-    /*
-    this is not carrier sennsing... this is if I don't trasmitt then we can send.
-    take into accont that retrasnission can happen so, sometime, i cannot be able
-    to send at this step because i need to trasmit an old message.
-    *//*
-    if(!runicast_is_transmitting(&runicast)) {
-
-      linkaddr_t recv;
-      packetbuf_copyfrom("Hello from Node 1", 18); // we put our data in the packet
-      recv.u8[0] = 3;
-      recv.u8[1] = 0;
-
-      printf("%u.%u: sending runicast to address %u.%u\n", linkaddr_node_addr.u8[0], linkaddr_node_addr.u8[1], recv.u8[0], recv.u8[1]);
-
-      /*
-        then we call the runicast send
-      *//*
-      runicast_send(&runicast, &recv, MAX_RETRANSMISSIONS);
-    }*/
+    
   }
 
   PROCESS_END();
 }
+
+
+PROCESS_THREAD (blinking_process, ev, data){
+
+  static struct etimer blinking_timer;
+
+  PROCESS_BEGIN();
+
+  //2 sec period: 1 sec on, 1 sec off
+  etimer_set(&blinking_timer, CLOCK_SECOND);
+
+  leds_off(LEDS_ALL);
+
+  while(1){
+    
+    PROCESS_WAIT_EVENT();
+
+    
+    if (etimer_expired(&blinking_timer) && alarm_state){
+      //the timer is expired and the alarm is active
+
+      //the timer expired: toggle every led
+      leds_toggle(LEDS_ALL);
+      //restart the timer
+      etimer_reset(&blinking_timer);
+    }
+
+    if (ev == PROCESS_EVENT_EXIT){
+      //restore the last status of the leds
+      (leds_status.red)? leds_on(LEDS_RED): leds_off(LEDS_RED);
+      (leds_status.green)? leds_on(LEDS_GREEN): leds_off(LEDS_GREEN);
+      (leds_status.blue)? leds_on(LEDS_BLUE): leds_off(LEDS_BLUE); 
+    }
+  }
+
+  PROCESS_END();
+}
+
+
+PROCESS_THREAD (locking_gate, ev, data){
+  
+  PROCESS_BEGIN();
+
+  if (gate_locked){
+    //we are locking the gate
+    leds_off(LEDS_GREEN);
+    leds_on(LEDS_RED);
+  }else{
+  //we are unlocking the gate
+    leds_on(LEDS_GREEN);
+    leds_off(LEDS_RED);
+  }
+
+  //save the state of the leds
+  leds_status.red = (leds_get() && LEDS_RED)?1:0;
+  leds_status.green = (leds_get() && LEDS_GREEN)?1:0;
+  
+
+  PROCESS_END();
+}
+
 
 
