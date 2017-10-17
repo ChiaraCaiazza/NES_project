@@ -48,6 +48,8 @@ static void recv_runicast(struct runicast_conn *c, const linkaddr_t *sender_addr
   if (sender_addr->u8[0] == 1 && sender_addr->u8[1] == 0 && command == 4)
     printf("Received temperature = %d\n", measurement);
 
+  if (sender_addr->u8[0] == 2 && sender_addr->u8[1] == 0 && command == 5)
+    printf("Received light = %d\n", measurement);
 }
 
 static void sent_runicast(struct runicast_conn *c, const linkaddr_t *receiver_addr, uint8_t retransmissions)
@@ -64,7 +66,6 @@ static void timedout_runicast(struct runicast_conn *c, const linkaddr_t *receive
                          receiver_addr->u8[0], receiver_addr->u8[1], retransmissions);
 }
 
-
 //Be careful to the order
 static const struct broadcast_callbacks broadcast_call = {broadcast_recv, broadcast_sent}; 
 static struct broadcast_conn broadcast;
@@ -74,12 +75,11 @@ static struct runicast_conn runicast_node2, runicast_node1;
 
 
 PROCESS_THREAD(handle_command_process, ev, data){
-
   static struct etimer et;
 
   /*
-    triggered only when there is a PROCESS_EXIT event, in this case we don't require to keep
-    the connection open
+    triggered only when there is a PROCESS_EXIT event, in this case we don't 
+    require to keep the connection open
   */
   PROCESS_EXITHANDLER(broadcast_close(&broadcast));
   PROCESS_EXITHANDLER(runicast_close(&runicast_node2));
@@ -90,18 +90,14 @@ PROCESS_THREAD(handle_command_process, ev, data){
 
   SENSORS_ACTIVATE(button_sensor);
 
-  /*
-    we open the connection. The second parameter is the channel on which the node will 
-    communicate.
-    it is a sort of port
-  */
+  //we open the broadcastconnection. The second parameter is the channel on 
+  //which the node will communicate. it is a sort of port
   broadcast_open(&broadcast, 129, &broadcast_call);
   //open a runicast connection with Node2 (garden) over the channel 130
   runicast_open(&runicast_node2,130, &runicast_calls); 
   runicast_open(&runicast_node1,131, &runicast_calls); 
 
   while(1) {
-
     PROCESS_WAIT_EVENT();
 
     if (ev == sensors_event && data == &button_sensor){
@@ -114,13 +110,13 @@ PROCESS_THREAD(handle_command_process, ev, data){
         //restart the timer (4 seconds from NOW)
         etimer_restart(&et);
 
-
       button_pressed ++;
-
     }else 
-      if (etimer_expired(&et)){   
-
+      if (etimer_expired(&et)){
+        //4 seconds from the last press
         if (alarm_state && button_pressed != 1){
+          //the alarm is active and the command is not "deactivate the alarm"
+          //the command has to be rejected
           button_pressed = 0;
           printf("Command rejected. Deactivate the alarm first.\n");
         }
@@ -131,12 +127,11 @@ PROCESS_THREAD(handle_command_process, ev, data){
           printf ("Command = %d.\n", command);
 
           linkaddr_t recv;
-          char char_command = '0' + command;
-          packetbuf_copyfrom(&char_command, sizeof(char_command));
+          packetbuf_copyfrom((void*)&command, sizeof(int));
 
           switch(command){
             case 1:
-              //lock-unlock the alarm
+              //activate/deactivate the alarm
 
               //change the state of the alarm
               alarm_state = (alarm_state == 0)?1:0;
@@ -148,6 +143,9 @@ PROCESS_THREAD(handle_command_process, ev, data){
             case 2:
               //sent a runicast message to node 2 so that the gate could be 
               //opened/closed
+
+              //change the state of the gate
+              gate_locked = (gate_locked == 0)?1:0;
             
               //the receiver has rime address 2.0
               recv.u8[0] = 2;
@@ -160,6 +158,7 @@ PROCESS_THREAD(handle_command_process, ev, data){
             case 3:
               //open and automatically close both the door and the gate
               broadcast_send(&broadcast);
+
               break;
             case 4:
               //sent a runicast message to node 1 so that he compute the mean 
@@ -174,8 +173,16 @@ PROCESS_THREAD(handle_command_process, ev, data){
              
               break;
             case 5:
+              //node 2 sense (and send) the outer light
+
+              //the receiver has rime address 2.0 (Node 2)
+              recv.u8[0] = 2;
+              recv.u8[1] = 0;
+
+              //then we call the runicast send    
+              runicast_send(&runicast_node2, &recv, MAX_RETRANSMISSIONS);
              
-               break;
+              break;
             default:
               //
                 printf("Error: command not recognized.\n");

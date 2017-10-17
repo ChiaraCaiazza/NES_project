@@ -2,10 +2,8 @@
 #include "net/rime/rime.h"
 #include "sys/etimer.h"
 #include "stdio.h"
-
 #include "dev/leds.h"
-
-
+#include "dev/light-sensor.h"
 
 #define MAX_RETRANSMISSIONS 5
 
@@ -22,6 +20,7 @@ PROCESS(main_process, "Main process");
 PROCESS(blinking_process, "Blinking process");
 PROCESS(locking_gate, "Locks the gate");
 PROCESS(open_gate, "Open the gate");
+PROCESS(sensing_light, "sensing_light");
 AUTOSTART_PROCESSES(&main_process);
   
 
@@ -30,7 +29,7 @@ static void broadcast_recv(struct broadcast_conn *c, const linkaddr_t *senderAdd
 				senderAddr->u8[1], (char *)packetbuf_dataptr());
 
   //obtain the int command code from the message
-  command = *(char *)packetbuf_dataptr() - '0';
+  command = *(int*)packetbuf_dataptr();
   printf("Received command = %d\n", command);
 
   switch (command){
@@ -77,8 +76,8 @@ static void recv_runicast(struct runicast_conn *c, const linkaddr_t *sender_addr
   printf("runicast message received from %d.%d. Sequence number = %d\n", 
                     sender_addr->u8[0], sender_addr->u8[1], seqno);
 
-  command = *(char *)packetbuf_dataptr() - '0';
-  printf("Rec command = %d\n", command);
+  command = *(int*)packetbuf_dataptr();
+  printf("Received command = %d\n", command);
 
   switch (command){
     case 2:
@@ -88,6 +87,11 @@ static void recv_runicast(struct runicast_conn *c, const linkaddr_t *sender_addr
       gate_locked = (gate_locked == 0)?1:0;
 
       process_start(&locking_gate, NULL);
+
+      break;
+    case 5:
+      //Obtain the external light value and send it to the central unit
+      process_start(&sensing_light, NULL);
 
       break;
     default:
@@ -228,6 +232,33 @@ PROCESS_THREAD(open_gate, ev, data){
       PROCESS_EXIT();
     }
   }
+
+  PROCESS_END();
+}
+
+
+PROCESS_THREAD(sensing_light, ev, data){
+  PROCESS_BEGIN();
+
+  //sensing for the minimun amount of time
+  SENSORS_ACTIVATE(light_sensor);
+  //normalized sample of light
+  int light = 10*light_sensor.value(LIGHT_SENSOR_PHOTOSYNTHETIC)/7;
+  printf("Sensed light %d lux\n", light);
+  SENSORS_DEACTIVATE(light_sensor);
+
+  //transmit the light measurement to the CU
+  if(!runicast_is_transmitting(&runicast_CU)){
+    linkaddr_t recv;
+
+    //the receiver is the CU with rime addr 3.0
+    recv.u8[0] = 3;
+    recv.u8[1] = 0;
+
+    packetbuf_copyfrom((void*)&light, sizeof(int));
+    runicast_send(&runicast_CU, &recv, MAX_RETRANSMISSIONS);
+  }
+
 
   PROCESS_END();
 }

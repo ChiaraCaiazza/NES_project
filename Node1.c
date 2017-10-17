@@ -15,8 +15,8 @@
 static int alarm_state = 0;
 
 static int command = 0;
-static int temperatures[5] = {0.0, 0.0, 0.0, 0.0, 0.0};
-static int temperature_index = 0;
+int temperatures[5] = {0.0, 0.0, 0.0, 0.0, 0.0};
+int temperature_index = 0;
 
 static unsigned char leds_status;
 
@@ -34,7 +34,7 @@ static void broadcast_recv(struct broadcast_conn *c, const linkaddr_t *senderAdd
 				senderAddr->u8[1], (char *)packetbuf_dataptr());
 
   //obtain the int command code from the message
-  command = *(char *)packetbuf_dataptr() - '0';
+  command = *(int*)packetbuf_dataptr();
   printf("Received broadcast command = %d\n", command);
 
   switch (command){
@@ -79,7 +79,7 @@ static void recv_runicast(struct runicast_conn *c, const linkaddr_t *sender_addr
   printf("runicast message received from %d.%d. Sequence number = %d\n", 
                     sender_addr->u8[0], sender_addr->u8[1], seqno);
 
-  command = *(char *)packetbuf_dataptr() - '0';
+  command = *(int*)packetbuf_dataptr();
   printf("Received command = %d\n", command);
 
   switch (command){
