@@ -39,7 +39,7 @@ static void broadcast_sent(struct broadcast_conn *c, int status, int num_tx){
 
 
 static void recv_runicast(struct runicast_conn *c, const linkaddr_t *sender_addr, uint8_t seqno){
-  printf("runicast message received form %d.%d. Sequence number = %d\n", sender_addr->u8[0], sender_addr->u8[1], seqno);
+  printf("runicast message received from %d.%d. Sequence number = %d\n", sender_addr->u8[0], sender_addr->u8[1], seqno);
 }
 
 static void sent_runicast(struct runicast_conn *c, const linkaddr_t *receiver_addr, uint8_t retransmissions)
@@ -61,7 +61,7 @@ static void timedout_runicast(struct runicast_conn *c, const linkaddr_t *receive
 static const struct broadcast_callbacks broadcast_call = {broadcast_recv, broadcast_sent}; 
 static struct broadcast_conn broadcast;
 static const struct runicast_callbacks runicast_calls = {recv_runicast, sent_runicast, timedout_runicast};
-static struct runicast_conn runicast;
+static struct runicast_conn runicast_node2;
 
 
 
@@ -74,7 +74,7 @@ PROCESS_THREAD(handle_command_process, ev, data){
     the connection open
   */
   PROCESS_EXITHANDLER(broadcast_close(&broadcast));
-  PROCESS_EXITHANDLER(runicast_close(&runicast));
+  PROCESS_EXITHANDLER(runicast_close(&runicast_node2));
 
 
   PROCESS_BEGIN();
@@ -87,7 +87,8 @@ PROCESS_THREAD(handle_command_process, ev, data){
     it is a sort of port
   */
   broadcast_open(&broadcast, 129, &broadcast_call);
-  runicast_open(&runicast, 144, &runicast_calls); //open our runicast connection over the channel #144
+  //open a runicast connection with Node2 (garden) over the channel 130
+  runicast_open(&runicast_node2,130, &runicast_calls); 
 
   while(1) {
 
@@ -113,30 +114,39 @@ PROCESS_THREAD(handle_command_process, ev, data){
           button_pressed = 0;
           printf("Command rejected. Deactivate the alarm first.\n");
         }
-        else{
+        else if(!runicast_is_transmitting(&runicast_node2)){
           command = button_pressed;
           button_pressed = 0;
           printf ("Command = %d.\n", command);
 
-          char str_command[10];
-          sprintf (str_command, "%d",command);
-          packetbuf_copyfrom(str_command, sizeof(str_command));
+          linkaddr_t recv;
+          char char_command = '0' + command;
+          packetbuf_copyfrom(&char_command, sizeof(char_command));
+
+        
 
           switch(command){
             case 1:
               //change the state of the alarm
               alarm_state = (alarm_state == 0)?1:0;
 
-
               printf("Sending command %d in broadcast\n", command);
               broadcast_send(&broadcast);
 
               break;
             case 2:
+              //sent a runicast message to node 2 so that the gate could be 
+              //opened/closed
+            
+              //the receiver has rime address 2.0
+              recv.u8[0] = 2;
+              recv.u8[1] = 0;
 
-             
-              printf("Sending command %d in broadcast\n", command);
-              broadcast_send(&broadcast);
+              //then we call the runicast send    
+              runicast_send(&runicast_node2, &recv, MAX_RETRANSMISSIONS);
+
+              printf("Sending runicast message (command %d) to address %u.%u\n", 
+                            command, recv.u8[0], recv.u8[1]);
               break;
             case 3:
              
@@ -165,14 +175,14 @@ PROCESS_THREAD(handle_command_process, ev, data){
 
     
     /*packetbuf_copyfrom("New message", 12);
-    broadcast_send(&broadcast);*/
+    broadcast_send(&broadcast);
 
 
-   /* /*
+   
     this is not carrier sennsing... this is if I don't trasmitt then we can send.
     take into accont that retrasnission can happen so, sometime, i cannot be able
     to send at this step because i need to trasmit an old message.
-    *//*
+    
     if(!runicast_is_transmitting(&runicast)) {
 
       linkaddr_t recv;
@@ -182,9 +192,9 @@ PROCESS_THREAD(handle_command_process, ev, data){
 
       printf("%u.%u: sending runicast to address %u.%u\n", linkaddr_node_addr.u8[0], linkaddr_node_addr.u8[1], recv.u8[0], recv.u8[1]);
 
-      /*
+      
         then we call the runicast send
-      *//*
+      
       runicast_send(&runicast, &recv, MAX_RETRANSMISSIONS);
     }*/
   }

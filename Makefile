@@ -1,4 +1,4 @@
-CONTIKI_PROJECT = NESProject
+CONTIKI_PROJECT =  CentralUnit Node1 Node2
 
 all: $(CONTIKI_PROJECT)
 

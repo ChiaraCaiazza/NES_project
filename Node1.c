@@ -35,21 +35,19 @@ static void broadcast_recv(struct broadcast_conn *c, const linkaddr_t *senderAdd
 
   switch (command){
     case 1:
-      alarm_state = (alarm_state == 0)?1:0;
       //the leds have to start blinking or stop blinking, depending on the state
       //of the alarm
 
+      //update the state of the alarm
+      alarm_state = (alarm_state == 0)?1:0;
+    
       //the user activates the alarm
       if (alarm_state)
         process_start(&blinking_process, NULL);
 
       //the user deactivate the alarm
-
       if (!alarm_state)
         process_exit(&blinking_process);
-
-         
-      
 
       printf ("alarm_state = %d\n", alarm_state);
       break;
@@ -87,7 +85,7 @@ static void timedout_runicast(struct runicast_conn *c, const linkaddr_t *receive
 static const struct broadcast_callbacks broadcast_call = {broadcast_recv, broadcast_sent}; 
 static struct broadcast_conn broadcast;
 static const struct runicast_callbacks runicast_calls = {recv_runicast, sent_runicast, timedout_runicast};
-static struct runicast_conn runicast;
+//static struct runicast_conn runicast;
 
 
 
@@ -97,7 +95,7 @@ PROCESS_THREAD(main_process, ev, data){
     the connection open
   */
   PROCESS_EXITHANDLER(broadcast_close(&broadcast));
-  PROCESS_EXITHANDLER(runicast_close(&runicast));
+  //PROCESS_EXITHANDLER(runicast_close(&runicast));
 
 
   PROCESS_BEGIN();
@@ -109,7 +107,7 @@ PROCESS_THREAD(main_process, ev, data){
     it is a sort of port
   */
   broadcast_open(&broadcast, 129, &broadcast_call);
-  runicast_open(&runicast, 144, &runicast_calls); //open our runicast connection over the channel #144
+  //runicast_open(&runicast, 144, &runicast_calls); //open our runicast connection over the channel #144
 
   while(1) {
 
@@ -131,6 +129,8 @@ PROCESS_THREAD (blinking_process, ev, data){
   //2 sec period: 1 sec on, 1 sec off
   etimer_set(&blinking_timer, CLOCK_SECOND);
 
+  leds_off(LEDS_ALL);
+
   while(1){
     
     PROCESS_WAIT_EVENT();
@@ -144,17 +144,11 @@ PROCESS_THREAD (blinking_process, ev, data){
     }
 
     if (ev == PROCESS_EVENT_EXIT){
-      printf("Exiting\n");
-
       //restore the last status of the leds
       (leds_status.red)? leds_on(LEDS_RED): leds_off(LEDS_RED);
       (leds_status.green)? leds_on(LEDS_GREEN): leds_off(LEDS_GREEN);
       (leds_status.blue)? leds_on(LEDS_BLUE): leds_off(LEDS_BLUE); 
-
-
     }
-
-
 
   }
 
