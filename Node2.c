@@ -16,15 +16,12 @@ static int gate_locked = 1;
 
 static int command = 0;
 
-struct leds{
-  int red;
-  int green;
-  int blue;
-} leds_status;
+static unsigned char leds_status;
 
 PROCESS(main_process, "Main process");
 PROCESS(blinking_process, "Blinking process");
 PROCESS(locking_gate, "Locks the gate");
+PROCESS(open_gate, "Open the gate");
 AUTOSTART_PROCESSES(&main_process);
   
 
@@ -55,6 +52,14 @@ static void broadcast_recv(struct broadcast_conn *c, const linkaddr_t *senderAdd
 
       printf ("alarm_state = %d\n", alarm_state);
       break;
+    case 3:
+      //open(and automatically close) both the door and the gate
+
+      //this is the node on the gate. the blue led blinks for 16 seconds then 
+      //stops;
+      process_start(&open_gate, NULL);
+
+      break;
     default:
       printf("Error: command not recognized\n");
   }
@@ -62,12 +67,14 @@ static void broadcast_recv(struct broadcast_conn *c, const linkaddr_t *senderAdd
 
 
 static void broadcast_sent(struct broadcast_conn *c, int status, int num_tx){
-  printf("broadcast message sent with status %d. Transmission number = %d\n", status, num_tx);
+  printf("broadcast message sent with status %d. Transmission number = %d\n", 
+                    status, num_tx);
 }
 
 
 static void recv_runicast(struct runicast_conn *c, const linkaddr_t *sender_addr, uint8_t seqno){
-  printf("runicast message received from %d.%d. Sequence number = %d\n", sender_addr->u8[0], sender_addr->u8[1], seqno);
+  printf("runicast message received from %d.%d. Sequence number = %d\n", 
+                    sender_addr->u8[0], sender_addr->u8[1], seqno);
 
   command = *(char *)packetbuf_dataptr() - '0';
   printf("Rec command = %d\n", command);
@@ -123,6 +130,8 @@ PROCESS_THREAD(main_process, ev, data){
 
   PROCESS_BEGIN();
 
+  //we initialize the lock of the gate
+  process_start(&locking_gate, NULL);
 
   /*
     we open the connection. The second parameter is the channel on which the node will 
@@ -152,6 +161,9 @@ PROCESS_THREAD (blinking_process, ev, data){
   //2 sec period: 1 sec on, 1 sec off
   etimer_set(&blinking_timer, CLOCK_SECOND);
 
+  //save the state of the leds
+  leds_status = leds_get();
+
   leds_off(LEDS_ALL);
 
   while(1){
@@ -168,12 +180,9 @@ PROCESS_THREAD (blinking_process, ev, data){
       etimer_reset(&blinking_timer);
     }
 
-    if (ev == PROCESS_EVENT_EXIT){
+    if (ev == PROCESS_EVENT_EXIT)
       //restore the last status of the leds
-      (leds_status.red)? leds_on(LEDS_RED): leds_off(LEDS_RED);
-      (leds_status.green)? leds_on(LEDS_GREEN): leds_off(LEDS_GREEN);
-      (leds_status.blue)? leds_on(LEDS_BLUE): leds_off(LEDS_BLUE); 
-    }
+      leds_set(leds_status);
   }
 
   PROCESS_END();
@@ -193,14 +202,34 @@ PROCESS_THREAD (locking_gate, ev, data){
     leds_on(LEDS_GREEN);
     leds_off(LEDS_RED);
   }
-
-  //save the state of the leds
-  leds_status.red = (leds_get() && LEDS_RED)?1:0;
-  leds_status.green = (leds_get() && LEDS_GREEN)?1:0;
   
 
   PROCESS_END();
 }
 
+PROCESS_THREAD(open_gate, ev, data){
+  static struct etimer gate_timer, blink_gate_timer;
 
+  PROCESS_BEGIN();
+
+  //the blue led blink every two seconds for 16 seconds
+  etimer_set(&blink_gate_timer, CLOCK_SECOND);
+  etimer_set(&gate_timer, CLOCK_SECOND*16);
+  leds_toggle(LEDS_BLUE);
+  
+  while(1){
+    PROCESS_WAIT_EVENT();
+    if (etimer_expired(&blink_gate_timer)){
+      leds_toggle(LEDS_BLUE);
+      etimer_restart(&blink_gate_timer);
+    }
+
+    if (etimer_expired(&gate_timer)){
+      leds_off(LEDS_BLUE);
+      PROCESS_EXIT();
+    }
+  }
+
+  PROCESS_END();
+}
 

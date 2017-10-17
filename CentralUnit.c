@@ -10,6 +10,7 @@
 
 //unlocked (0) by default
 static int alarm_state = 0;
+//gate locked(1) by default
 static int gate_locked = 1;
 
 static int command = 0;
@@ -123,14 +124,14 @@ PROCESS_THREAD(handle_command_process, ev, data){
           char char_command = '0' + command;
           packetbuf_copyfrom(&char_command, sizeof(char_command));
 
-        
-
           switch(command){
             case 1:
+              //lock-unlock the alarm
+
               //change the state of the alarm
               alarm_state = (alarm_state == 0)?1:0;
 
-              printf("Sending command %d in broadcast\n", command);
+              //send the command in broadcast
               broadcast_send(&broadcast);
 
               break;
@@ -145,12 +146,11 @@ PROCESS_THREAD(handle_command_process, ev, data){
               //then we call the runicast send    
               runicast_send(&runicast_node2, &recv, MAX_RETRANSMISSIONS);
 
-              printf("Sending runicast message (command %d) to address %u.%u\n", 
-                            command, recv.u8[0], recv.u8[1]);
               break;
             case 3:
-             
-               break;
+              //open and automatically close both the door and the gate
+              broadcast_send(&broadcast);
+              break;
             case 4:
              
                break;
@@ -163,40 +163,10 @@ PROCESS_THREAD(handle_command_process, ev, data){
 
             }
           }
-          
-
-          
-
 
           //display the available commands
           process_start(&display_process, NULL);
       }
-    
-
-    
-    /*packetbuf_copyfrom("New message", 12);
-    broadcast_send(&broadcast);
-
-
-   
-    this is not carrier sennsing... this is if I don't trasmitt then we can send.
-    take into accont that retrasnission can happen so, sometime, i cannot be able
-    to send at this step because i need to trasmit an old message.
-    
-    if(!runicast_is_transmitting(&runicast)) {
-
-      linkaddr_t recv;
-      packetbuf_copyfrom("Hello from Node 1", 18); // we put our data in the packet
-      recv.u8[0] = 3;
-      recv.u8[1] = 0;
-
-      printf("%u.%u: sending runicast to address %u.%u\n", linkaddr_node_addr.u8[0], linkaddr_node_addr.u8[1], recv.u8[0], recv.u8[1]);
-
-      
-        then we call the runicast send
-      
-      runicast_send(&runicast, &recv, MAX_RETRANSMISSIONS);
-    }*/
   }
 
   PROCESS_END();

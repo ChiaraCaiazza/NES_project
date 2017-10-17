@@ -14,14 +14,12 @@ static int alarm_state = 0;
 
 static int command = 0;
 
-struct leds{
-  int red;
-  int green;
-  int blue;
-} leds_status;
+static unsigned char leds_status;
 
 PROCESS(main_process, "Main process");
 PROCESS(blinking_process, "Blinking process");
+PROCESS(open_door, "Open the door");
+
 AUTOSTART_PROCESSES(&main_process);
   
 
@@ -31,7 +29,7 @@ static void broadcast_recv(struct broadcast_conn *c, const linkaddr_t *senderAdd
 
   //obtain the int command code from the message
   command = *(char *)packetbuf_dataptr() - '0';
-  printf("Received command = %d\n", command);
+  printf("Received broadcast command = %d\n", command);
 
   switch (command){
     case 1:
@@ -50,6 +48,15 @@ static void broadcast_recv(struct broadcast_conn *c, const linkaddr_t *senderAdd
         process_exit(&blinking_process);
 
       printf ("alarm_state = %d\n", alarm_state);
+
+      break;
+    case 3:
+      //open(and automatically close) both the door and the gate
+
+      //this is the node on the door: it waits for 14 seconds, then it blinks 
+      //for 16 second with a period of two seconds
+      process_start(&open_door, NULL);
+
       break;
     default:
       printf("Error: command not recognized\n");
@@ -129,6 +136,9 @@ PROCESS_THREAD (blinking_process, ev, data){
   //2 sec period: 1 sec on, 1 sec off
   etimer_set(&blinking_timer, CLOCK_SECOND);
 
+  //save the state of the leds
+  leds_status = leds_get();
+
   leds_off(LEDS_ALL);
 
   while(1){
@@ -145,9 +155,7 @@ PROCESS_THREAD (blinking_process, ev, data){
 
     if (ev == PROCESS_EVENT_EXIT){
       //restore the last status of the leds
-      (leds_status.red)? leds_on(LEDS_RED): leds_off(LEDS_RED);
-      (leds_status.green)? leds_on(LEDS_GREEN): leds_off(LEDS_GREEN);
-      (leds_status.blue)? leds_on(LEDS_BLUE): leds_off(LEDS_BLUE); 
+      leds_set(leds_status);
     }
 
   }
@@ -155,3 +163,33 @@ PROCESS_THREAD (blinking_process, ev, data){
   PROCESS_END();
 }
 
+
+PROCESS_THREAD(open_door, ev, data){
+  static struct etimer door_timer, blink_door_timer;
+
+  PROCESS_BEGIN();
+
+  //waits 14 seconds
+  etimer_set(&door_timer, CLOCK_SECOND*14);
+  PROCESS_WAIT_EVENT_UNTIL(etimer_expired(&door_timer));
+
+  //then the blue led blink every two seconds for 16 seconds
+  etimer_set(&blink_door_timer, CLOCK_SECOND);
+  etimer_set(&door_timer, CLOCK_SECOND*16);
+  leds_toggle(LEDS_BLUE);
+  
+  while(1){
+    PROCESS_WAIT_EVENT();
+    if (etimer_expired(&blink_door_timer)){
+      leds_toggle(LEDS_BLUE);
+      etimer_restart(&blink_door_timer);
+    }
+
+    if (etimer_expired(&door_timer)){
+      leds_off(LEDS_BLUE);
+      PROCESS_EXIT();
+    }
+  }
+
+  PROCESS_END();
+}
