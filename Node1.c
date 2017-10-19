@@ -3,18 +3,19 @@
 #include "sys/etimer.h"
 #include "stdio.h"
 #include "core/lib/random.h"
-
 #include "dev/leds.h"
 #include "dev/sht11/sht11-sensor.h"
-
+#include "dev/button-sensor.h"
 
 
 #define MAX_RETRANSMISSIONS 5
 
 //unlocked (0) by default
-static int alarm_state = 0;
-
-static int command = 0;
+int alarm_state = 0;
+//off(0) by default
+int light_state = 0;
+int command = 0;
+int reject_locking = 0;
 int temperatures[5] = {0.0, 0.0, 0.0, 0.0, 0.0};
 int temperature_index = 0;
 
@@ -35,15 +36,18 @@ static void broadcast_recv(struct broadcast_conn *c, const linkaddr_t *senderAdd
 
   //obtain the int command code from the message
   command = *(int*)packetbuf_dataptr();
-  printf("Received broadcast command = %d\n", command);
+  //printf("Received broadcast command = %d\n", command);
 
   switch (command){
     case 1:
       //the leds have to start blinking or stop blinking, depending on the state
       //of the alarm
+        printf ("alarm_state_old = %d\n", alarm_state);
 
       //update the state of the alarm
       alarm_state = (alarm_state == 0)?1:0;
+
+        printf ("alarm_state = %d\n", alarm_state);
     
       //the user activates the alarm
       if (alarm_state)
@@ -52,8 +56,6 @@ static void broadcast_recv(struct broadcast_conn *c, const linkaddr_t *senderAdd
       //the user deactivate the alarm
       if (!alarm_state)
         process_exit(&blinking_process);
-
-      printf ("alarm_state = %d\n", alarm_state);
 
       break;
     case 3:
@@ -80,7 +82,7 @@ static void recv_runicast(struct runicast_conn *c, const linkaddr_t *sender_addr
                     sender_addr->u8[0], sender_addr->u8[1], seqno);
 
   command = *(int*)packetbuf_dataptr();
-  printf("Received command = %d\n", command);
+  //printf("Received command = %d\n", command);
 
   switch (command){
     case 4:
@@ -93,14 +95,16 @@ static void recv_runicast(struct runicast_conn *c, const linkaddr_t *sender_addr
   }
 }
 
+
 static void sent_runicast(struct runicast_conn *c, const linkaddr_t *receiver_addr, uint8_t retransmissions)
 {
   printf("runicast message sent to %d.%d, retransmissions %d\n", receiver_addr->u8[0], receiver_addr->u8[1], retransmissions);
 }
 
-/*
+
+/*******************************************************************************
   timedout_runicast called when timeout expired
-*/
+*******************************************************************************/
 static void timedout_runicast(struct runicast_conn *c, const linkaddr_t *receiver_addr, uint8_t retransmissions)
 {
   printf("runicast message timed out when sending to %d.%d, retransmissions %d\n", 
@@ -115,7 +119,6 @@ static const struct runicast_callbacks runicast_calls = {recv_runicast, sent_run
 static struct runicast_conn runicast_CU;
 
 
-
 PROCESS_THREAD(main_process, ev, data){
   /*
     triggered only when there is a PROCESS_EXIT event, in this case we don't 
@@ -124,22 +127,34 @@ PROCESS_THREAD(main_process, ev, data){
   PROCESS_EXITHANDLER(broadcast_close(&broadcast));
   PROCESS_EXITHANDLER(runicast_close(&runicast_CU));
 
-
   PROCESS_BEGIN();
 
+  //at the beginning the lights are off
+  leds_off(LEDS_GREEN);
+  leds_on(LEDS_RED);
 
-  /*
-    we open the connection. The second parameter is the channel on which the node will 
-    communicate.
-    it is a sort of port
-  */
+  SENSORS_ACTIVATE(button_sensor);
+
+  //we open the connection
   broadcast_open(&broadcast, 129, &broadcast_call);
   runicast_open(&runicast_CU, 131, &runicast_calls); //open our runicast connection over the channel #144
 
   while(1) {
 
-    PROCESS_WAIT_EVENT();
+    PROCESS_WAIT_EVENT_UNTIL(ev==sensors_event && data==&button_sensor);
+
+    //the alarm is not active
+    if (!alarm_state){
+      //update the state of the lights
+      light_state = (light_state)?0:1;
+
+      //toggle the leds
+      leds_toggle(LEDS_RED);
+      leds_toggle(LEDS_GREEN);
+    }
   }
+
+  SENSORS_DEACTIVATE(button_sensor);
 
   PROCESS_END();
 }
@@ -150,6 +165,22 @@ PROCESS_THREAD (blinking_process, ev, data){
   static struct etimer blinking_timer;
 
   PROCESS_BEGIN();
+
+  if (reject_locking){
+    printf("Refuse to activate the alarm\n");
+    int error = 4031;
+    packetbuf_copyfrom((void*)&error, sizeof(int));
+    
+    //send the command in broadcast
+    broadcast_send(&broadcast);
+
+    //restore the status of the lock (unlocked)
+    alarm_state = 0;
+
+    PROCESS_EXIT();
+
+    break;
+  }
 
   //2 sec period: 1 sec on, 1 sec off
   etimer_set(&blinking_timer, CLOCK_SECOND);
@@ -187,6 +218,7 @@ PROCESS_THREAD(open_door, ev, data){
 
   PROCESS_BEGIN();
 
+  reject_locking = 1;
   //waits 14 seconds
   etimer_set(&door_timer, CLOCK_SECOND*14);
   PROCESS_WAIT_EVENT_UNTIL(etimer_expired(&door_timer));
@@ -205,6 +237,7 @@ PROCESS_THREAD(open_door, ev, data){
 
     if (etimer_expired(&door_timer)){
       leds_off(LEDS_BLUE);
+      reject_locking = 0;
       PROCESS_EXIT();
     }
   }
@@ -243,8 +276,8 @@ PROCESS_THREAD(temperature_process, ev, data){
 
     temperature_index++;
 
-    printf("temperatures = {%d, %d, %d, %d, %d}\n", temperatures[0],
-            temperatures[1], temperatures[2], temperatures[3], temperatures[4]);
+    //printf("temperatures = {%d, %d, %d, %d, %d}\n", temperatures[0],
+    //        temperatures[1], temperatures[2], temperatures[3], temperatures[4]);
   }
 
   PROCESS_END();

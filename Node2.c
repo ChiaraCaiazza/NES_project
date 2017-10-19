@@ -8,9 +8,9 @@
 #define MAX_RETRANSMISSIONS 5
 
 //unlocked (0) by default
-static int alarm_state = 0;
+int alarm_state = 0;
 //the gate is locked by default
-static int gate_locked = 1;
+int gate_locked = 1;
 
 static int command = 0;
 
@@ -30,7 +30,7 @@ static void broadcast_recv(struct broadcast_conn *c, const linkaddr_t *senderAdd
 
   //obtain the int command code from the message
   command = *(int*)packetbuf_dataptr();
-  printf("Received command = %d\n", command);
+  //printf("Received command = %d\n", command);
 
   switch (command){
     case 1:
@@ -40,7 +40,6 @@ static void broadcast_recv(struct broadcast_conn *c, const linkaddr_t *senderAdd
       //update the state of the alarm
       alarm_state = (alarm_state == 0)?1:0;
       
-
       //the user activates the alarm
       if (alarm_state)
         process_start(&blinking_process, NULL);
@@ -49,7 +48,6 @@ static void broadcast_recv(struct broadcast_conn *c, const linkaddr_t *senderAdd
       if (!alarm_state)
         process_exit(&blinking_process);
 
-      printf ("alarm_state = %d\n", alarm_state);
       break;
     case 3:
       //open(and automatically close) both the door and the gate
@@ -58,6 +56,14 @@ static void broadcast_recv(struct broadcast_conn *c, const linkaddr_t *senderAdd
       //stops;
       process_start(&open_gate, NULL);
 
+      break;
+    case 4031:
+      //node 1 refuse to activate the alarm
+      
+      //deactivate the alarm
+      process_exit(&blinking_process);
+      alarm_state = 0;
+      
       break;
     default:
       printf("Error: command not recognized\n");
@@ -77,7 +83,7 @@ static void recv_runicast(struct runicast_conn *c, const linkaddr_t *sender_addr
                     sender_addr->u8[0], sender_addr->u8[1], seqno);
 
   command = *(int*)packetbuf_dataptr();
-  printf("Received command = %d\n", command);
+  //printf("Received command = %d\n", command);
 
   switch (command){
     case 2:
@@ -136,19 +142,13 @@ PROCESS_THREAD(main_process, ev, data){
   //we initialize the lock of the gate
   process_start(&locking_gate, NULL);
 
-  /*
-    we open the connection. The second parameter is the channel on which the node will 
-    communicate.
-    it is a sort of port
-  */
+  //we open the connection
   broadcast_open(&broadcast, 129, &broadcast_call);
   runicast_open(&runicast_CU, 130, &runicast_calls); //open our runicast connection over the channel #144
 
   while(1) {
 
-    PROCESS_WAIT_EVENT();
-
-    
+    PROCESS_WAIT_EVENT();    
   }
 
   PROCESS_END();
@@ -156,7 +156,6 @@ PROCESS_THREAD(main_process, ev, data){
 
 
 PROCESS_THREAD (blinking_process, ev, data){
-
   static struct etimer blinking_timer;
 
   PROCESS_BEGIN();
@@ -173,7 +172,6 @@ PROCESS_THREAD (blinking_process, ev, data){
     
     PROCESS_WAIT_EVENT();
 
-    
     if (etimer_expired(&blinking_timer) && alarm_state){
       //the timer is expired and the alarm is active
 
@@ -193,7 +191,6 @@ PROCESS_THREAD (blinking_process, ev, data){
 
 
 PROCESS_THREAD (locking_gate, ev, data){
-  
   PROCESS_BEGIN();
 
   if (gate_locked){
@@ -206,9 +203,9 @@ PROCESS_THREAD (locking_gate, ev, data){
     leds_off(LEDS_RED);
   }
   
-
   PROCESS_END();
 }
+
 
 PROCESS_THREAD(open_gate, ev, data){
   static struct etimer gate_timer, blink_gate_timer;
@@ -258,7 +255,6 @@ PROCESS_THREAD(sensing_light, ev, data){
     packetbuf_copyfrom((void*)&light, sizeof(int));
     runicast_send(&runicast_CU, &recv, MAX_RETRANSMISSIONS);
   }
-
 
   PROCESS_END();
 }

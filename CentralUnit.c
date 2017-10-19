@@ -36,6 +36,18 @@ static void broadcast_recv(struct broadcast_conn *c, const linkaddr_t *senderAdd
 */
 static void broadcast_sent(struct broadcast_conn *c, int status, int num_tx){
   printf("broadcast message sent with status %d. Transmission number = %d\n", status, num_tx);
+
+  int* data = (int*)packetbuf_dataptr();
+  int measurement = *data;
+
+  if (measurement == 4031){
+    printf("error 403: Node 1.0 refuse to activate the alarm");
+    alarm_state = 0;
+
+    //display the available commands
+    process_start(&display_process, NULL);
+  }
+
 }
 
 
@@ -97,11 +109,14 @@ PROCESS_THREAD(handle_command_process, ev, data){
   runicast_open(&runicast_node2,130, &runicast_calls); 
   runicast_open(&runicast_node1,131, &runicast_calls); 
 
+  //display the available commands
+  process_start(&display_process, NULL);
+
   while(1) {
     PROCESS_WAIT_EVENT();
 
     if (ev == sensors_event && data == &button_sensor){
-      printf("Button pressed\n");
+      //printf("Button pressed\n");
 
       if (button_pressed == 0)
         //set the timer the first time
