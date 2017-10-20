@@ -25,8 +25,8 @@ AUTOSTART_PROCESSES(&main_process);
   
 
 static void broadcast_recv(struct broadcast_conn *c, const linkaddr_t *senderAddr){
-  printf("broadcast message received from %d.%d: '%s'\n", senderAddr->u8[0], 
-				senderAddr->u8[1], (char *)packetbuf_dataptr());
+  printf("broadcast message received from %d.%d.\n", senderAddr->u8[0], 
+				senderAddr->u8[1]);
 
   //obtain the int command code from the message
   command = *(int*)packetbuf_dataptr();

@@ -31,8 +31,8 @@ AUTOSTART_PROCESSES(&main_process, &temperature_process);
   
 
 static void broadcast_recv(struct broadcast_conn *c, const linkaddr_t *senderAddr){
-  printf("broadcast message received from %d.%d: '%s'\n", senderAddr->u8[0], 
-				senderAddr->u8[1], (char *)packetbuf_dataptr());
+  printf("broadcast message received from %d.%d.\n", senderAddr->u8[0], 
+				senderAddr->u8[1]);
 
   //obtain the int command code from the message
   command = *(int*)packetbuf_dataptr();
@@ -269,7 +269,7 @@ PROCESS_THREAD(temperature_process, ev, data){
     //24° is the default value
     //RANDOM_MAX = 65535 -> random_rand()/6000 at most 10 values
     //             +/-5°(more or less)
-      temperatures[temperature_index%5] += (int)random_rand()/6000;;
+      temperatures[temperature_index%5] += (int)random_rand()/6000;
 
     temperature_index++;
 
