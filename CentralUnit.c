@@ -23,8 +23,8 @@ AUTOSTART_PROCESSES(&handle_command_process);
   
 
 static void broadcast_recv(struct broadcast_conn *c, const linkaddr_t *senderAddr){
-  printf("broadcast message received from %d.%d: '%s'\n", senderAddr->u8[0], 
-				senderAddr->u8[1], (char *)packetbuf_dataptr());
+  printf("broadcast message received from %d.%d.\n", senderAddr->u8[0], 
+				senderAddr->u8[1]);
 
   int* data = (int*)packetbuf_dataptr();
   int measurement = *data;
@@ -139,7 +139,7 @@ PROCESS_THREAD(handle_command_process, ev, data){
           printf("Command rejected. Deactivate the alarm first.\n");
         }
         else if(!runicast_is_transmitting(&runicast_node2) && 
-                                  !runicast_is_transmitting(&runicast_node1)){
+            !runicast_is_transmitting(&runicast_node1) && button_pressed != 0){
           command = button_pressed;
           button_pressed = 0;
           printf ("Command = %d.\n", command);
