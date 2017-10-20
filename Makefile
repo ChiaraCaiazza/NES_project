@@ -6,8 +6,11 @@ CONTIKI = /home/user/contiki
 
 CONTIKI_WITH_RIME = 1
 
+<<<<<<< HEAD
 MODULES += dev/sht11
 
+=======
+>>>>>>> origin/master
 TARGET_LIBFILES += -lm
 
 CFLAGS += -DPROJECT_CONF_H=\"project-conf.h\"

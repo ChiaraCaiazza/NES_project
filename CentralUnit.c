@@ -23,8 +23,13 @@ AUTOSTART_PROCESSES(&handle_command_process);
   
 
 static void broadcast_recv(struct broadcast_conn *c, const linkaddr_t *senderAddr){
+<<<<<<< HEAD
   printf("broadcast message received from %d.%d.\n", senderAddr->u8[0], 
 				senderAddr->u8[1]);
+=======
+  printf("broadcast message received from %d.%d: '%s'\n", senderAddr->u8[0], 
+				senderAddr->u8[1], (char *)packetbuf_dataptr());
+>>>>>>> origin/master
 
   int* data = (int*)packetbuf_dataptr();
   int measurement = *data;
