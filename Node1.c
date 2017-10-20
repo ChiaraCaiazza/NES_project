@@ -42,12 +42,9 @@ static void broadcast_recv(struct broadcast_conn *c, const linkaddr_t *senderAdd
     case 1:
       //the leds have to start blinking or stop blinking, depending on the state
       //of the alarm
-        printf ("alarm_state_old = %d\n", alarm_state);
 
       //update the state of the alarm
       alarm_state = (alarm_state == 0)?1:0;
-
-        printf ("alarm_state = %d\n", alarm_state);
     
       //the user activates the alarm
       if (alarm_state)

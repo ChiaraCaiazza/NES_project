@@ -6,6 +6,8 @@ CONTIKI = /home/user/contiki
 
 CONTIKI_WITH_RIME = 1
 
+TARGET_LIBFILES += -lm
+
 CFLAGS += -DPROJECT_CONF_H=\"project-conf.h\"
 
 include $(CONTIKI)/Makefile.include
