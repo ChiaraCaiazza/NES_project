@@ -215,6 +215,11 @@ PROCESS_THREAD(open_gate, ev, data){
   //the blue led blink every two seconds for 16 seconds
   etimer_set(&blink_gate_timer, CLOCK_SECOND);
   etimer_set(&gate_timer, CLOCK_SECOND*16);
+  //save the state of the leds
+  leds_status = leds_get();
+  //open the gate 
+  leds_on(LEDS_GREEN);
+  leds_off(LEDS_RED);
   leds_toggle(LEDS_BLUE);
   
   while(1){
@@ -225,7 +230,8 @@ PROCESS_THREAD(open_gate, ev, data){
     }
 
     if (etimer_expired(&gate_timer)){
-      leds_off(LEDS_BLUE);
+      //restore the leds
+      leds_set(leds_status);
       PROCESS_EXIT();
     }
   }
