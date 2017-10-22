@@ -12,13 +12,13 @@
 
 
 #define SAMPLE_TO_DEACTIVATE 120
-#define SAMPLE_TO_ACTIVATE 20
+#define SAMPLE_TO_ACTIVATE 30
 
 //extension off by default(0)
 static int extension_active = 0;
 int sample_noise = 0;
 int sample_silence = 0;
-int temperature = 20;
+static int temperature = 20;
 int human_sensed = 0;
 int sample_to_be_activated = -1;
 
@@ -41,6 +41,7 @@ static void broadcast_recv(struct broadcast_conn *c, const linkaddr_t *senderAdd
 
       //update the state
       extension_active = (extension_active)?0:1;
+      human_sensed = 0;
 
       if (extension_active){
         //the user activate the extension
@@ -50,6 +51,7 @@ static void broadcast_recv(struct broadcast_conn *c, const linkaddr_t *senderAdd
       if (!extension_active){
         //the user deactivate the sensing
         process_exit(&sensing_process);
+        process_exit(&temperature_monitoring_process);
       }
 
       break;
@@ -102,7 +104,6 @@ PROCESS_THREAD(sensing_process, ev, data)
   static struct etimer sensing_timer;
 
   PROCESS_BEGIN();
-  SENSORS_ACTIVATE(phidgets);
 
   etimer_set(&sensing_timer, CLOCK_SECOND);
   //led red=ON ->stop to use the extension
@@ -118,8 +119,12 @@ PROCESS_THREAD(sensing_process, ev, data)
       //while sensing the blue led toggle
       leds_toggle(LEDS_BLUE);
 
+
+      SENSORS_ACTIVATE(phidgets);
       //obtain the measurement
       aux = phidgets.value(PHIDGET5V_1);
+      //deactivate the sensor
+      SENSORS_DEACTIVATE(phidgets);
       
       aux *= 3300;  // battery ref value typical when connected over USB
       //aux = (aux>>12); //divide by 4096
@@ -147,8 +152,6 @@ PROCESS_THREAD(sensing_process, ev, data)
             sample_to_be_activated = 1;
           else
             sample_to_be_activated = 0;
-
-          printf("Sample to be activated %d\n", sample_to_be_activated );
         }
       }
 
@@ -160,49 +163,49 @@ PROCESS_THREAD(sensing_process, ev, data)
       //printf ("db %d\n", db);
 /*********************************************************************************/      
 
-      if (db<=20 ){
+      if (db<=20 && human_sensed){
         sample_silence++;
         sample_noise = 0;
 
-        if (sample_silence > SAMPLE_TO_DEACTIVATE){
+        if (sample_silence >= SAMPLE_TO_DEACTIVATE){
+          sample_to_be_activated = -1;
+
           //there is none in the room
           human_sensed = 0;
           //the green led is on if someone is inside
           leds_off(LEDS_GREEN);
 
-          sample_to_be_activated = -1;
           //monitors the temperature is not usefull anymore
           process_exit(&temperature_monitoring_process);
 
           //during the night we turn off the tv's leds
-
           //sensing for the minimun amount of time
           SENSORS_ACTIVATE(light_sensor);
           //normalized sample of light
           int light = 10*light_sensor.value(LIGHT_SENSOR_PHOTOSYNTHETIC)/7;
-          printf("Sensed light %d lux\n", light);
+          printf("Sensed light %d lux. ", light);
           SENSORS_DEACTIVATE(light_sensor);
 
           if (light < 10)
-            printf("Tv = off\n");
+            printf("Leds = off\n");
+          else 
+            printf("Nothing to do.\n");
         }
-
       }
 
-      if (db>20){
+      if (db>20 && !human_sensed){
         sample_noise++;
         sample_silence = 0;
 
-        if (sample_noise > SAMPLE_TO_ACTIVATE){
+        if (sample_noise >= SAMPLE_TO_ACTIVATE){
+          sample_to_be_activated = -1;
+
           //someone is inside the room
           human_sensed = 1;
           //the green led is on if someone is inside
           leds_on(LEDS_GREEN);
 
-          sample_to_be_activated = -1;
-
           process_start(&temperature_monitoring_process, NULL);
-          printf("temperature_monitoring_process -> START\n");
         }
       } 
     }
@@ -212,11 +215,14 @@ PROCESS_THREAD(sensing_process, ev, data)
 
       //led red=ON ->stop to use the extension
       leds_off(LEDS_BLUE);
+      leds_off(LEDS_GREEN);
       leds_on(LEDS_RED);
 
       etimer_stop(&sensing_timer);
-      //deactivate the sensor
-      SENSORS_ACTIVATE(phidgets);
+
+      sample_noise = 0;
+      sample_silence = 0;
+      sample_to_be_activated = -1;
     }
   }
   PROCESS_END();
@@ -228,39 +234,41 @@ PROCESS_THREAD(temperature_monitoring_process, ev, data){
   int temp;
 
   PROCESS_BEGIN();
+  printf("Someone is inside\n");
 
-  //check the temperature every 20 seconds
-  etimer_set(&temperature_timer, CLOCK_SECOND*20);
-
-  printf("started");
+  //check the temperature every 10 seconds
+  etimer_set(&temperature_timer, CLOCK_SECOND*10);
 
   while(1){
-    //the sensor has to stay active for the minimum amount of time
-    SENSORS_ACTIVATE(sht11_sensor);
-    //actual (normalized) temp sample (-39 is the default value)
-    temp = (sht11_sensor.value(SHT11_SENSOR_TEMP)/10-396)/10;
-    //now the desired temperature is the default value
-    temp = temp + 39 + temperature; 
-    //RANDOM_MAX = 65535 -> random_rand()/10000 at most 6 values
-    //             +/-3°(more or less)
-    temp += (int)random_rand()/10000;
-    //stop the sensing phase
-    SENSORS_DEACTIVATE(sht11_sensor);
-  
-    if (temp >= (temperature + 1) || temp <= (temperature - 1)){
-      printf ("Desired temperature = %d. Actual temperature = ", temperature);
-      printf("%d. Activate the air conditioning system.\n", temp);
-    }
-    else{
-      printf ("Desired temperature = %d. Actual temperature = ", temperature);
-      printf("%d. Nothing to do.\n", temp);
-    }
+    if (ev == sensors_event && data != &button_sensor)
+      continue;
+
+    if (human_sensed && extension_active){ 
+
+      //the sensor has to stay active for the minimum amount of time
+      SENSORS_ACTIVATE(sht11_sensor);
+      //actual (normalized) temp sample (-39 is the default value)
+      temp = (sht11_sensor.value(SHT11_SENSOR_TEMP)/10-396)/10;
+      //now the desired temperature is the default value
+      temp = temp + 39 + temperature; 
+      //RANDOM_MAX = 65535 -> random_rand()/10000 at most 6 values
+      //             +/-3°(more or less)
+      temp += (int)random_rand()/10000;
+      //stop the sensing phase
+      SENSORS_DEACTIVATE(sht11_sensor);
     
+      printf ("Desired temperature = %d. Actual temperature = %d.", 
+          temperature, temp);
+      if (temp > (temperature + 1) || temp < (temperature - 1))
+        printf(" Activate the air conditioning system.\n");
+      else
+        printf(" Nothing to do.\n");
+    }
 
-    PROCESS_WAIT_EVENT();
-
+    PROCESS_WAIT_EVENT(); 
+    
     if (etimer_expired(&temperature_timer)){
-      //every 20 seconds!!
+      //every 10 seconds!!
       etimer_reset(&temperature_timer);
     }
 

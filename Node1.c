@@ -149,6 +149,8 @@ PROCESS_THREAD(main_process, ev, data){
       leds_toggle(LEDS_RED);
       leds_toggle(LEDS_GREEN);
     }
+    else
+      printf("Command rejected: deactivate the alarm first.\n" );
   }
 
   SENSORS_DEACTIVATE(button_sensor);
